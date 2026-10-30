@@ -2,7 +2,7 @@
 
 These agents run inside customers' networks, so we take reports seriously.
 
-**Reporting a vulnerability:** email support@certhalo.com with (subject: "Security"), with the details and how to reproduce it. Please don't open a public issue for security problems. We'll acknowledge your report within 3 working days and keep you updated until it's fixed.
+**Reporting a vulnerability:** email support@certhalo.com with the subject "Security", the details and how to reproduce it. Please don't open a public issue for security problems. We'll acknowledge your report within 3 working days and keep you updated until it's fixed.
 
 **Design rules the agents follow** (see the README for details):
 
