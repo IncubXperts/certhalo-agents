@@ -39,6 +39,29 @@ All of them behave the same way, take the same settings and send the same [repor
 
 Downloads for every platform, with SHA-256 checksums, are on the [releases page](https://github.com/IncubXperts/certhalo-agents/releases).
 
+### Downloading the binaries
+
+Check a download against the checksums file first:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing   # Linux: sha256sum -c SHA256SUMS --ignore-missing
+```
+
+The binaries aren't code-signed yet, so the first run may be blocked:
+
+- **macOS**: a file downloaded in a browser is quarantined by Gatekeeper ("cannot be opened because the developer cannot be verified"). Remove the quarantine flag, then run it:
+
+  ```bash
+  chmod +x certhalo-agent-darwin-arm64
+  xattr -d com.apple.quarantine certhalo-agent-darwin-arm64
+  ```
+
+  Or right-click the file in Finder, choose **Open**, then **Open** again. Use `-darwin-amd64` on Intel Macs.
+
+- **Windows**: SmartScreen may show "Windows protected your PC" for the `.exe`. Choose **More info**, then **Run anyway**. Downloads that reach a server without a browser (for example with `Invoke-WebRequest`) aren't affected. For the PowerShell agent, a downloaded script may need `Unblock-File .\CertHaloAgent.ps1`, or `-ExecutionPolicy Bypass` as in the [Task Scheduler example](examples/windows-task-scheduler.md).
+
+- **Linux**: `chmod +x certhalo-agent-linux-amd64` (or `-arm64`) is all it needs.
+
 ### Docker
 
 ```bash
