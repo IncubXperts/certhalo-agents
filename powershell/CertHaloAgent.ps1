@@ -156,15 +156,19 @@ function Invoke-Once {
     $body = $report | ConvertTo-Json -Depth 6
     # Never send key material, whatever went wrong upstream (CertHalo refuses it too).
     if ($body -match 'PRIVATE KEY') { throw "refusing to send a report containing a private key" }
-    # Straight to stdout: anything written to the pipeline here would become Invoke-Once's return value.
-    if ($DryRun) { [Console]::Out.WriteLine($body); continue }
+    # Collected, and written to the pipeline after the run: written here, it would become
+    # Invoke-Once's return value instead of output (and `| Out-File` would get nothing).
+    if ($DryRun) { $script:DryRunOutput.Add($body); continue }
     try { Send-Report $body } catch { Write-Warning "certhalo-agent: $_"; $status = 2 }
   }
   return $status
 }
 
+$script:DryRunOutput = New-Object 'System.Collections.Generic.List[string]'
 do {
   try { $code = Invoke-Once } catch { Write-Warning "certhalo-agent: $_"; $code = 1 }
+  foreach ($report in $script:DryRunOutput) { Write-Output $report }
+  $script:DryRunOutput.Clear()
   if (-not $Loop) { exit $code }
   Start-Sleep -Seconds $Interval
 } while ($true)
