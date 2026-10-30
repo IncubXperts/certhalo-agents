@@ -1,0 +1,16 @@
+# /etc/systemd/system/certhalo-agent.service
+# Put the key in /etc/certhalo-agent.env (chmod 600):  CERTHALO_API_KEY=chk_...
+[Unit]
+Description=CertHalo agent: report internal TLS certificates
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/certhalo-agent.env
+ExecStart=/usr/local/bin/certhalo-agent --targets /etc/certhalo-agent/targets.txt --interval 21600
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

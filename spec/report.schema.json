@@ -1,0 +1,125 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://certhalo.com/api/v1/schemas/report.json",
+    "title": "CertHalo agent report",
+    "description": "What an agent inside a network sends about the certificates it can reach. Unknown fields are ignored. Never include private keys: a report containing one is refused.",
+    "type": "object",
+    "required": [
+        "agent",
+        "observations"
+    ],
+    "properties": {
+        "agent": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": "Shown on the dashboard, e.g. dc1-agent."
+                },
+                "version": {
+                    "type": "string",
+                    "maxLength": 30
+                },
+                "intervalSeconds": {
+                    "type": "integer",
+                    "minimum": 300,
+                    "maximum": 604800,
+                    "default": 21600,
+                    "description": "How often this agent reports. A domain with no report for twice this long raises a 'no report' alert."
+                }
+            }
+        },
+        "observations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+                "type": "object",
+                "required": [
+                    "host",
+                    "observedAt"
+                ],
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "maxLength": 253,
+                        "description": "Hostname or IP address as the agent connected to it; internal names allowed."
+                    },
+                    "port": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535,
+                        "default": 443
+                    },
+                    "observedAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "When the agent connected; within the last 24 hours."
+                    },
+                    "chain": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "string",
+                            "description": "PEM certificate"
+                        },
+                        "description": "The certificates as the server sent them, leaf first."
+                    },
+                    "tls": {
+                        "type": "object",
+                        "properties": {
+                            "protocol": {
+                                "type": "string",
+                                "examples": [
+                                    "TLSv1.3"
+                                ]
+                            },
+                            "cipher": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "error": {
+                        "type": "object",
+                        "required": [
+                            "code"
+                        ],
+                        "description": "Instead of chain, when the agent couldn't connect.",
+                        "properties": {
+                            "code": {
+                                "enum": [
+                                    "timeout",
+                                    "refused",
+                                    "reset",
+                                    "not_tls",
+                                    "dns",
+                                    "other"
+                                ]
+                            },
+                            "message": {
+                                "type": "string",
+                                "maxLength": 200
+                            }
+                        }
+                    }
+                },
+                "oneOf": [
+                    {
+                        "required": [
+                            "chain"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "error"
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+}

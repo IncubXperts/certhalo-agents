@@ -1,0 +1,7 @@
+# One host per line: host, host:port or [ipv6]:port. Port 443 if none is given.
+# Anything after # is a comment.
+intranet.corp.example
+wiki.corp.example
+db.corp.example:5432
+10.0.4.12:8443          # load balancer
+[fd00::12]:443

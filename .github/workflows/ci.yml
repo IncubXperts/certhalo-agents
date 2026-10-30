@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.agent }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { agent: go, os: ubuntu-latest }
+          - { agent: node, os: ubuntu-latest }
+          - { agent: python, os: ubuntu-latest }
+          - { agent: powershell, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: matrix.agent == 'go'
+        uses: actions/setup-go@v5
+        with: { go-version: "1.23" }
+      - if: matrix.agent == 'go'
+        working-directory: go
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+          go run . --dry-run --targets ../.github/ci-targets.txt --name ci > ../report.json
+
+      - if: matrix.agent == 'node'
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - if: matrix.agent == 'node'
+        working-directory: node
+        run: |
+          node --test
+          node certhalo-agent.mjs --dry-run --targets ../.github/ci-targets.txt --name ci > ../report.json
+
+      - if: matrix.agent == 'python'
+        uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - if: matrix.agent == 'python'
+        working-directory: python
+        run: |
+          python -m unittest -v test_certhalo_agent
+          python certhalo_agent.py --dry-run --targets ../.github/ci-targets.txt --name ci > ../report.json
+
+      - if: matrix.agent == 'powershell'
+        shell: pwsh
+        run: |
+          ./powershell/CertHaloAgent.ps1 -DryRun -Targets ./.github/ci-targets.txt -Name ci | Out-File -Encoding utf8 report.json
+
+      # Every agent's real output must match the report format CertHalo accepts.
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Report matches spec/report.schema.json
+        shell: bash
+        run: |
+          pip install --quiet "jsonschema==4.23.0"
+          python .github/check-report.py spec/report.schema.json report.json

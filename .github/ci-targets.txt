@@ -1,0 +1,4 @@
+# Public hosts for CI dry runs, plus one that never resolves (an error observation).
+example.com
+certhalo.com:443
+does-not-exist.invalid

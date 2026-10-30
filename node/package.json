@@ -1,0 +1,13 @@
+{
+  "name": "@incubxperts/certhalo-agent",
+  "version": "1.0.0",
+  "description": "Reports the TLS certificates of internal hosts to CertHalo for monitoring.",
+  "type": "module",
+  "bin": { "certhalo-agent": "./certhalo-agent.mjs" },
+  "files": ["certhalo-agent.mjs"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test" },
+  "homepage": "https://certhalo.com/docs/api#internal",
+  "repository": { "type": "git", "url": "https://github.com/IncubXperts/certhalo-agents.git", "directory": "node" },
+  "license": "MIT"
+}

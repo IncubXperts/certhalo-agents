@@ -1,0 +1,13 @@
+# /etc/systemd/system/certhalo-agent.timer
+#   systemctl enable --now certhalo-agent.timer
+[Unit]
+Description=Run the CertHalo agent every 6 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,39 @@
+# Runs the agent every 6 hours inside the cluster. Create the key secret first:
+#   kubectl create secret generic certhalo-agent --from-literal=api-key=<Agent key from CertHalo>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: certhalo-agent-targets
+data:
+  targets.txt: |
+    intranet.corp.example
+    my-service.my-namespace.svc.cluster.local:8443
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: certhalo-agent
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: agent
+              image: ghcr.io/incubxperts/certhalo-agent:1
+              args: ["--interval", "21600"] # report once and exit; matches the schedule
+              env:
+                - name: CERTHALO_API_KEY
+                  valueFrom: { secretKeyRef: { name: certhalo-agent, key: api-key } }
+                - name: CERTHALO_AGENT_NAME
+                  value: k8s-prod-cluster
+              volumeMounts:
+                - { name: targets, mountPath: /config, readOnly: true }
+              securityContext: { runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+          volumes:
+            - name: targets
+              configMap: { name: certhalo-agent-targets }
