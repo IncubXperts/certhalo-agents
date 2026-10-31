@@ -14,12 +14,13 @@ import json
 import os
 import socket
 import ssl
+import struct
 import sys
 import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 DEFAULT_URL = "https://certhalo.com"
 DEFAULT_INTERVAL = 21600  # 6 hours
 MAX_PER_REPORT = 100  # CertHalo's limit per report
@@ -33,20 +34,35 @@ def is_ip(host):
         return False
 
 
+# Schemes a target can start with: the protocol to speak, and its usual port.
+SCHEMES = {"https": ("", 443), "tls": ("", 443), "smtp": ("smtp", 25), "postgres": ("postgres", 5432), "postgresql": ("postgres", 5432), "mysql": ("mysql", 3306), "ldap": ("ldap", 389)}
+# Ports where STARTTLS is the norm, used when a target has no scheme.
+STARTTLS_PORTS = {25: "smtp", 587: "smtp", 389: "ldap", 3306: "mysql", 5432: "postgres"}
+
+
 def parse_target(line):
-    """'host', 'host:port' or '[ipv6]:port'; a scheme or path is ignored."""
-    s = line.split("://", 1)[-1].split("/", 1)[0]
+    """'host', 'host:port' or '[ipv6]:port', optionally with a scheme: 'smtp://', 'postgres://',
+    'mysql://' or 'ldap://' for STARTTLS, 'https://' or 'tls://' for TLS from the first byte.
+    Without a scheme, ports 25, 587, 389, 3306 and 5432 use STARTTLS. Returns (host, port, proto),
+    proto "" meaning TLS from the first byte."""
+    s, proto, default_port, explicit = line, "", 443, False
+    if "://" in s:
+        scheme, s = s.split("://", 1)
+        if scheme.lower() not in SCHEMES:
+            raise ValueError(f'unknown scheme "{scheme}" (use https, smtp, postgres, mysql or ldap)')
+        (proto, default_port), explicit = SCHEMES[scheme.lower()], True
+    s = s.split("/", 1)[0]
     if s.startswith("["):
         host, _, rest = s[1:].partition("]")
-        port = rest.lstrip(":") or "443"
+        port = rest.lstrip(":") or str(default_port)
     elif is_ip(s):
-        host, port = s, "443"
+        host, port = s, str(default_port)
     else:
         host, _, port = s.partition(":")
-        port = port or "443"
+        port = port or str(default_port)
     if not port.isdigit() or not 1 <= int(port) <= 65535:
         raise ValueError(f'bad port in "{s}"')
-    return host, int(port)
+    return host, int(port), proto if explicit else STARTTLS_PORTS.get(int(port), "")
 
 
 def read_targets(path):
@@ -65,8 +81,14 @@ def read_targets(path):
     return targets
 
 
+class NoTLS(Exception):
+    """The server answered, but won't switch to TLS (or isn't the server the protocol expects)."""
+
+
 def classify(err):
     message = str(err)[:200] or err.__class__.__name__
+    if isinstance(err, NoTLS):
+        return {"code": "not_tls", "message": message}
     if isinstance(err, socket.gaierror):
         return {"code": "dns", "message": message}
     if isinstance(err, (socket.timeout, TimeoutError)):
@@ -80,7 +102,132 @@ def classify(err):
     return {"code": "other", "message": message}
 
 
-def observe(host, port, timeout=10):
+def recv_exact(sock, n):
+    """Exactly n bytes. Never more: the TLS handshake starts right after."""
+    data = b""
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            raise ConnectionResetError("the server closed the connection")
+        data += chunk
+    return data
+
+
+def recv_line(sock):
+    line = b""
+    while not line.endswith(b"\n"):
+        if len(line) > 4096:
+            raise NoTLS("the server sent more than expected")
+        line += recv_exact(sock, 1)
+    return line.decode("latin-1").rstrip("\r\n")
+
+
+def smtp_reply(sock):
+    lines = []
+    for _ in range(100):
+        line = recv_line(sock)
+        if not line[:3].isdigit():
+            raise NoTLS("not an SMTP server")
+        lines.append(line[4:].strip())  # after "250-" or "250 "
+        if len(line) == 3 or line[3] != "-":
+            return int(line[:3]), lines
+    raise NoTLS("the SMTP reply is too long")
+
+
+def smtp_starttls(sock):
+    code, _ = smtp_reply(sock)
+    if code != 220:
+        raise NoTLS(f"the SMTP server didn't greet ({code})")
+    sock.sendall(b"EHLO certhalo-agent\r\n")
+    code, lines = smtp_reply(sock)
+    if code != 250:
+        raise NoTLS(f"the SMTP server refused EHLO ({code})")
+    if not any(l.upper() == "STARTTLS" or l.upper().startswith("STARTTLS ") for l in lines):
+        raise NoTLS("the SMTP server doesn't offer STARTTLS")
+    sock.sendall(b"STARTTLS\r\n")
+    code, _ = smtp_reply(sock)
+    if code != 220:
+        raise NoTLS(f"the SMTP server refused STARTTLS ({code})")
+
+
+def postgres_starttls(sock):
+    # SSLRequest: length 8, then the code 80877103. The server answers one byte: S (yes) or N (no).
+    sock.sendall(struct.pack(">II", 8, 80877103))
+    answer = recv_exact(sock, 1)
+    if answer == b"N":
+        raise NoTLS("the PostgreSQL server doesn't have TLS turned on")
+    if answer != b"S":
+        raise NoTLS("not a PostgreSQL server")
+
+
+MYSQL_CLIENT_PROTOCOL_41, MYSQL_CLIENT_SSL, MYSQL_CLIENT_SECURE_CONNECTION = 0x0200, 0x0800, 0x8000
+
+
+def mysql_starttls(sock):
+    head = recv_exact(sock, 4)
+    n = int.from_bytes(head[:3], "little")
+    if n > 65536:
+        raise NoTLS("not a MySQL server")
+    p = recv_exact(sock, n)
+    if p[:1] == b"\xff":
+        raise NoTLS("the MySQL server refused the connection: " + p[3:].decode("utf-8", "replace").lstrip("#"))
+    # Initial handshake (protocol 10): version string, thread id, 8 bytes of salt, a filler byte, then capabilities.
+    end = p.find(b"\x00")
+    if p[:1] != b"\x0a" or end < 0 or len(p) < end + 16:
+        raise NoTLS("not a MySQL server")
+    if not int.from_bytes(p[end + 14 : end + 16], "little") & MYSQL_CLIENT_SSL:
+        raise NoTLS("the MySQL server doesn't have TLS turned on")
+    # SSLRequest: our capabilities, max packet size, character set (utf8mb4), 23 zero bytes. Sequence number 1.
+    payload = struct.pack("<IIB23x", MYSQL_CLIENT_SSL | MYSQL_CLIENT_PROTOCOL_41 | MYSQL_CLIENT_SECURE_CONNECTION, 1 << 24, 45)
+    sock.sendall(struct.pack("<I", len(payload))[:3] + b"\x01" + payload)
+
+
+# The StartTLS extended request (RFC 4511), message ID 1.
+LDAP_STARTTLS_REQUEST = bytes([0x30, 0x1D, 0x02, 0x01, 0x01, 0x77, 0x18, 0x80, 0x16]) + b"1.3.6.1.4.1.1466.20037"
+
+
+def ber_next(b):
+    """The first BER element in b: (tag, contents, what follows)."""
+    if len(b) < 2:
+        raise NoTLS("not an LDAP server")
+    n, at = b[1], 2
+    if n & 0x80:
+        size = n & 0x7F
+        if size == 0 or size > 3 or len(b) < 2 + size:
+            raise NoTLS("not an LDAP server")
+        n, at = int.from_bytes(b[2 : 2 + size], "big"), 2 + size
+    if len(b) < at + n:
+        raise NoTLS("not an LDAP server")
+    return b[0], b[at : at + n], b[at + n :]
+
+
+def ldap_starttls(sock):
+    sock.sendall(LDAP_STARTTLS_REQUEST)
+    tag, n = recv_exact(sock, 2)
+    if n & 0x80:
+        size = n & 0x7F
+        if size == 0 or size > 3:
+            raise NoTLS("not an LDAP server")
+        n = int.from_bytes(recv_exact(sock, size), "big")
+    if tag != 0x30 or n > 65536:
+        raise NoTLS("not an LDAP server")
+    # LDAPMessage: messageID, then the ExtendedResponse [APPLICATION 24], which starts with resultCode.
+    _, _, rest = ber_next(recv_exact(sock, n))
+    op, response, _ = ber_next(rest)
+    if op != 0x78:
+        raise NoTLS("not an LDAP server")
+    code, value, _ = ber_next(response)
+    if code != 0x0A or len(value) != 1:
+        raise NoTLS("not an LDAP server")
+    if value[0] != 0:
+        raise NoTLS(f"the LDAP server refused StartTLS (result {value[0]})")
+
+
+# Protocols that start in plain text and switch to TLS on request: only the messages each needs, no login, no data.
+STARTTLS = {"smtp": smtp_starttls, "postgres": postgres_starttls, "mysql": mysql_starttls, "ldap": ldap_starttls}
+
+
+def observe(host, port, timeout=10, proto=""):
     """The chain a host presents, or why we couldn't get it. Verification is off on purpose:
     CertHalo judges the chain, so expired or untrusted certificates must still be reported."""
     observed_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -90,6 +237,8 @@ def observe(host, port, timeout=10):
     ctx.verify_mode = ssl.CERT_NONE
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
+            if proto:
+                STARTTLS[proto](sock)
             with ctx.wrap_socket(sock, server_hostname=None if is_ip(host) else host) as tls:
                 if hasattr(tls, "get_unverified_chain"):  # Python 3.13+: DER bytes, as the server sent them
                     ders = list(tls.get_unverified_chain())
@@ -126,7 +275,7 @@ def send(cfg, body):
 
 
 def run_once(cfg):
-    observations = [observe(h, p, cfg.timeout) for h, p in read_targets(cfg.targets)]
+    observations = [observe(h, p, cfg.timeout, proto) for h, p, proto in read_targets(cfg.targets)]
     status = 0
     for i in range(0, len(observations), MAX_PER_REPORT):
         report = {"agent": {"name": cfg.name, "version": VERSION, "intervalSeconds": cfg.interval}, "observations": observations[i : i + MAX_PER_REPORT]}

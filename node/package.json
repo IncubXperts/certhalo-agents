@@ -1,6 +1,6 @@
 {
   "name": "@incubxperts/certhalo-agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Reports the TLS certificates of internal hosts to CertHalo for monitoring.",
   "type": "module",
   "bin": { "certhalo-agent": "./certhalo-agent.mjs" },

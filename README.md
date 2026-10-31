@@ -19,7 +19,7 @@ All of them behave the same way, take the same settings and send the same [repor
 ## Quick start
 
 1. In CertHalo, open **Developers** and create a key with the access **Agent (sends reports only)**. If your servers use your own certificate authority, upload its root certificate there too.
-2. List your hosts in `targets.txt`, one per line (`host`, `host:port` or `[ipv6]:port`; see [the example](examples/targets.txt)).
+2. List your hosts in `targets.txt`, one per line (`host`, `host:port` or `[ipv6]:port`; see [the example](examples/targets.txt) and [what can be monitored](#what-can-be-monitored)).
 3. See what would be sent, without sending anything:
 
    ```bash
@@ -82,6 +82,22 @@ python3 python/certhalo_agent.py --targets targets.txt
 ```powershell
 .\powershell\CertHaloAgent.ps1 -Targets .\targets.txt
 ```
+
+## What can be monitored
+
+Anything that serves a TLS certificate, written in `targets.txt` as `host`, `host:port` or `[ipv6]:port` (port 443 when there isn't one):
+
+- **TLS from the first byte**: HTTPS on any port, LDAPS (636), Redis, Kafka and RabbitMQ with TLS, appliance and admin pages.
+- **STARTTLS**, services that start in plain text and switch to TLS on request. The agent sends only the few messages each protocol needs to switch, then reads the certificate: it never logs in or reads data.
+
+  | Service | Write it as | Or just the port |
+  | --- | --- | --- |
+  | PostgreSQL | `postgres://db.corp:5432` | `db.corp:5432` |
+  | MySQL, MariaDB | `mysql://db.corp:3306` | `db.corp:3306` |
+  | SMTP (mail servers) | `smtp://mail.corp:587` | `mail.corp:25`, `mail.corp:587` |
+  | LDAP | `ldap://dc1.corp:389` | `dc1.corp:389` |
+
+  Use the scheme for a service on another port (`smtp://mail.corp:2525`), and `https://` to force TLS from the first byte on one of those ports. A server that doesn't have TLS turned on is reported as `not_tls`, with the reason.
 
 ## Settings
 

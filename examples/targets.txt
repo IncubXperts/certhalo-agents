@@ -2,6 +2,12 @@
 # Anything after # is a comment.
 intranet.corp.example
 wiki.corp.example
-db.corp.example:5432
 10.0.4.12:8443          # load balancer
 [fd00::12]:443
+dc1.corp.example:636    # LDAPS
+
+# Services that switch to TLS on request (STARTTLS): by scheme, or by their usual port.
+db.corp.example:5432    # PostgreSQL (or postgres://db.corp.example)
+mysql://reports.corp.example
+smtp://mail.corp.example:587
+ldap://dc1.corp.example
